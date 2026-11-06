@@ -33,13 +33,21 @@ const WorkoutDraft = z.object({
 });
 export type WorkoutDraft = z.infer<typeof WorkoutDraft>;
 
-const PlanOutput = z.object({
+const BlockOutput = z.object({
   title: z.string().describe("Short name for this training block"),
   goal: z.string().describe("What this block builds toward"),
-  rationale: z.string().describe("How the block is structured and why (phases, weekly rhythm, progression)"),
-  message: z.string().describe("A short note to the athlete introducing the plan"),
+  weeks: z.number().int().describe("Block length in weeks, usually 4-8"),
+  outline: z.string().describe("Week-by-week outline of the block: focus and progression of each week, including any lighter week"),
+  rationale: z.string().describe("How the block is structured and why (weekly rhythm, priorities)"),
+  message: z.string().describe("A short note to the athlete introducing the block and this week"),
   athlete_summary: z.string().describe("Your updated coaching notes about this athlete (see instructions)"),
-  workouts: z.array(WorkoutDraft),
+  workouts: z.array(WorkoutDraft).describe("Only the sessions for the dates you were asked to write"),
+});
+
+const WeekOutput = z.object({
+  message: z.string().describe("Your weekly check-in: what you saw last week and the focus of the coming week"),
+  athlete_summary: z.string().describe("Your updated coaching notes about this athlete (see instructions)"),
+  workouts: z.array(WorkoutDraft).describe("Only the sessions for the dates you were asked to write"),
 });
 
 const Change = z.object({
@@ -67,6 +75,7 @@ How you coach:
 - Be specific: sets x reps with %1RM or RPE, rest, time caps, target paces or heart-rate zones, and scaling options. Use the athlete's units (kg or lb) and metric distances unless told otherwise.
 - Use the evidence: RPE, soreness, energy, completion, results and notes from feedback, plus Strava activities (pace, heart rate, duration, relative effort). Unplanned activities count toward training load. If sessions consistently feel too hard or too easy, adjust.
 - Keep warm-ups short and relevant; include a cool-down or mobility note when useful.
+- You write one week at a time. Each new week is written on Sunday from the outline of the block plus how the previous week actually went, so adjust the coming week to the evidence rather than following the outline blindly.
 - Only schedule sessions on training days. Leave rest days empty (don't create 'rest' workouts) unless an active-recovery session is genuinely useful.
 
 Your coaching notes (athlete_summary) are your long-term memory of this athlete: you only see what is in them plus recent data next time. Rewrite them every time as a concise, up-to-date summary (max ~250 words): current estimated maxes/benchmarks and paces, how they respond to volume and intensity, preferences and dislikes, recurring issues or injuries, what to watch next. Carry forward everything still relevant; drop what is outdated.
@@ -130,10 +139,18 @@ function formatActivity(a: Record<string, number | string | null>): string {
   return `- ${parts.join(" · ")}`;
 }
 
+export interface ActivePlan {
+  id: string;
+  title: string;
+  start_date: string;
+  end_date: string;
+  weeks: number;
+}
+
 export interface CoachContext {
   text: string;
   editable: Map<string, WorkoutRow>;
-  planId: string | null;
+  plan: ActivePlan | null;
   lastScheduledDate: string | null;
 }
 
@@ -180,16 +197,16 @@ export async function buildContext(admin: SupabaseClient, userId: string, today:
       units: profile.units,
     }, null, 2)}`,
     `# Your coaching notes\n${memoryRes.data?.athlete_summary || "(none yet: this is a new athlete)"}`,
-    `# Current plan\n${planRes.data
-      ? `${planRes.data.title} (${planRes.data.start_date} to ${planRes.data.end_date})\nGoal: ${planRes.data.goal}\nRationale: ${planRes.data.rationale}`
-      : "(no active plan)"}`,
+    `# Current block\n${planRes.data
+      ? `${planRes.data.title} (${planRes.data.weeks} weeks, ${planRes.data.start_date} to ${planRes.data.end_date})\nGoal: ${planRes.data.goal}\nRationale: ${planRes.data.rationale}\nOutline:\n${planRes.data.outline || "(none)"}`
+      : "(no active block)"}`,
     `# Last 4 weeks of sessions with feedback\n${(pastRes.data ?? []).map((w) => formatWorkout(w as WorkoutRow, false)).join("\n") || "(none)"}`,
     `# Strava / Garmin activities, last 4 weeks\n${(activitiesRes.data ?? []).map(formatActivity).join("\n") || "(none or Strava not connected)"}`,
     `# Upcoming scheduled sessions (ids in brackets; only 'planned' ones can be changed)\n${upcoming.map((w) => formatWorkout(w, true)).join("\n") || "(none)"}`,
     `# Recent conversation (newest last)\n${(messagesRes.data ?? []).reverse().map((m) => `${m.role}: ${m.content}`).join("\n") || "(none)"}`,
   ];
 
-  return { text: sections.join("\n\n"), editable, planId: planRes.data?.id ?? null, lastScheduledDate };
+  return { text: sections.join("\n\n"), editable, plan: planRes.data ?? null, lastScheduledDate };
 }
 
 // ---------------------------------------------------------------------------
@@ -220,8 +237,12 @@ async function ask<T>(format: ReturnType<typeof betaZodOutputFormat>, context: s
   return message.parsed_output as T;
 }
 
-export function writePlan(context: string, task: string) {
-  return ask<z.infer<typeof PlanOutput>>(betaZodOutputFormat(PlanOutput), context, task);
+export function writeBlock(context: string, task: string) {
+  return ask<z.infer<typeof BlockOutput>>(betaZodOutputFormat(BlockOutput), context, task);
+}
+
+export function writeWeek(context: string, task: string) {
+  return ask<z.infer<typeof WeekOutput>>(betaZodOutputFormat(WeekOutput), context, task);
 }
 
 export function adaptPlan(context: string, task: string) {

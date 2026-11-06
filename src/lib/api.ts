@@ -80,8 +80,19 @@ export async function getMessages(): Promise<CoachMessage[]> {
 
 export interface CoachReply { message: string; created?: number; changes?: number }
 
-export const requestPlan = (opts: { weeks: number; request?: string; mode: 'new' | 'extend' }) =>
-  invoke<CoachReply>('coach', { action: 'plan', today: today(), ...opts });
+/** Starts a new training block; the coach writes its first week. */
+export const startBlock = (request?: string) =>
+  invoke<CoachReply>('coach', { action: 'plan', today: today(), request });
+
+/** Writes the next week now instead of waiting for Sunday's automatic run. */
+export const writeNextWeek = (request?: string) =>
+  invoke<CoachReply>('coach', { action: 'next_week', today: today(), request });
+
+export interface WeeklyRun { week_start: string; status: 'running' | 'written' | 'skipped' | 'failed'; detail: string | null; updated_at: string }
+
+export async function getLatestWeeklyRun(): Promise<WeeklyRun | null> {
+  return must(await supabase.from('weekly_runs').select('*').order('week_start', { ascending: false }).limit(1).maybeSingle());
+}
 
 export const sendFeedbackToCoach = (workoutId: string) =>
   invoke<CoachReply>('coach', { action: 'feedback', today: today(), workoutId });

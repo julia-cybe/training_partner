@@ -1,146 +1,77 @@
 // The AI coach. Actions:
-//   { action: "plan", today, weeks?, request?, mode?: "new" | "extend" }  write a new block or the next weeks
-//   { action: "feedback", today, workoutId }                              review feedback and adapt upcoming sessions
-//   { action: "message", today, text }                                    chat with the coach; it may adapt the plan
-import type { SupabaseClient } from "npm:@supabase/supabase-js@2.119.0";
-import { adaptPlan, buildContext, type WorkoutDraft, writePlan } from "../_shared/coach.ts";
+//   { action: "plan", today, request? }       start a new block and write its first week
+//   { action: "next_week", today, request? }  write the next week now (normally done automatically on Sunday)
+//   { action: "feedback", today, workoutId }  review a logged session and adapt the current week
+//   { action: "message", today, text }        chat with the coach; it may adapt the current week
+import { adaptPlan, buildContext } from "../_shared/coach.ts";
 import { addDays, adminClient, handle, HttpError, isoDate, json, requireUser } from "../_shared/http.ts";
+import { inWindow, mondayOf, saveMemoryAndReply, startBlock, sundayOf, toRow, writeNextWeek } from "../_shared/planning.ts";
 import { syncActivities } from "../_shared/strava.ts";
-
-const DATE = /^\d{4}-\d{2}-\d{2}$/;
-const KINDS = ["strength", "metcon", "run", "hybrid", "endurance", "gymnastics", "recovery", "rest"];
-const INTENSITIES = ["easy", "moderate", "hard"];
-
-function pick(value: string, allowed: string[], fallback: string) {
-  const v = value.trim().toLowerCase();
-  return allowed.includes(v) ? v : fallback;
-}
-
-function toRow(userId: string, planId: string | null, w: WorkoutDraft, position: number, changeNote: string | null) {
-  return {
-    user_id: userId,
-    plan_id: planId,
-    date: w.date,
-    position,
-    title: w.title,
-    kind: pick(w.kind, KINDS, "hybrid"),
-    intensity: pick(w.intensity, INTENSITIES, "moderate"),
-    duration_min: Math.max(0, Math.round(w.duration_min)),
-    summary: w.summary,
-    blocks: w.blocks,
-    status: "planned",
-    change_note: changeNote,
-  };
-}
-
-function inWindow(date: string, from: string, to: string) {
-  return DATE.test(date) && date >= from && date <= to;
-}
-
-async function saveMemoryAndReply(admin: SupabaseClient, userId: string, summary: string, reply: string) {
-  await admin.from("coach_memory").upsert({
-    user_id: userId,
-    athlete_summary: summary,
-    updated_at: new Date().toISOString(),
-  });
-  await admin.from("coach_messages").insert({ user_id: userId, role: "coach", content: reply });
-}
 
 Deno.serve(handle(async (req) => {
   const admin = adminClient();
   const userId = await requireUser(req, admin);
   const body = await req.json().catch(() => ({}));
   const today = isoDate(body.today);
-
-  // Pull fresh Garmin/Strava data first so the coach sees today's sessions.
-  await syncActivities(admin, userId).catch((err) => console.error("Strava sync failed", err));
+  const request = typeof body.request === "string" ? body.request.trim().slice(0, 2000) : "";
+  if (request && (body.action === "plan" || body.action === "next_week")) {
+    await admin.from("coach_messages").insert({ user_id: userId, role: "athlete", content: request });
+  }
 
   // -------------------------------------------------------------------------
   if (body.action === "plan") {
-    const weeks = Math.min(4, Math.max(1, Number(body.weeks) || 2));
-    const mode = body.mode === "extend" ? "extend" : "new";
-    const request = typeof body.request === "string" ? body.request.trim().slice(0, 2000) : "";
-    const ctx = await buildContext(admin, userId, today);
+    return json(await startBlock(admin, userId, today, today, request));
+  }
 
-    const start = mode === "extend" && ctx.lastScheduledDate && ctx.lastScheduledDate >= today
-      ? addDays(ctx.lastScheduledDate, 1)
-      : today;
-    const end = addDays(start, weeks * 7 - 1);
-
-    if (request) await admin.from("coach_messages").insert({ user_id: userId, role: "athlete", content: request });
-
-    const task = mode === "new"
-      ? `Write a new training block and program the first ${weeks} week(s) in full detail: sessions dated ${start} to ${end} inclusive. Any upcoming 'planned' sessions will be replaced by this plan.${request ? `\nThe athlete's request: ${request}` : ""}`
-      : `Continue the current block: program the next ${weeks} week(s) in full detail, sessions dated ${start} to ${end} inclusive, progressing from what has been done and how the athlete responded. Keep the block's title/goal unless it should change.${request ? `\nThe athlete's request: ${request}` : ""}`;
-
-    const plan = await writePlan(ctx.text, task);
-    const drafts = plan.workouts.filter((w) => inWindow(w.date, start, end));
-    if (drafts.length === 0) throw new HttpError(502, "The coach didn't schedule any sessions. Try again.");
-
-    let planId = ctx.planId;
-    if (mode === "new" || !planId) {
-      await admin.from("plans").update({ status: "archived" }).eq("user_id", userId).eq("status", "active");
-      await admin.from("workouts").delete().eq("user_id", userId).eq("status", "planned").gte("date", start);
-      const { data: created, error } = await admin.from("plans").insert({
-        user_id: userId,
-        title: plan.title,
-        goal: plan.goal,
-        rationale: plan.rationale,
-        start_date: start,
-        end_date: end,
-      }).select("id").single();
-      if (error) throw error;
-      planId = created.id;
-    } else {
-      await admin.from("plans").update({ end_date: end, rationale: plan.rationale, goal: plan.goal }).eq("id", planId);
-    }
-
-    const perDay = new Map<string, number>();
-    const rows = drafts.map((w) => {
-      const position = perDay.get(w.date) ?? 0;
-      perDay.set(w.date, position + 1);
-      return toRow(userId, planId, w, position, null);
+  if (body.action === "next_week") {
+    const { data: last } = await admin.from("workouts").select("date").eq("user_id", userId)
+      .order("date", { ascending: false }).limit(1).maybeSingle();
+    // The week after the last written one, but never a week that has already started.
+    const candidate = last && last.date >= today ? addDays(mondayOf(last.date), 7) : addDays(mondayOf(today), 7);
+    const result = await writeNextWeek(admin, userId, today, candidate, request);
+    await admin.from("weekly_runs").upsert({
+      user_id: userId, week_start: result.start, status: "written", detail: "Written on request", updated_at: new Date().toISOString(),
     });
-    const { error } = await admin.from("workouts").insert(rows);
-    if (error) throw error;
-
-    await saveMemoryAndReply(admin, userId, plan.athlete_summary, plan.message);
-    return json({ message: plan.message, created: rows.length, start, end });
+    return json(result);
   }
 
   // -------------------------------------------------------------------------
   if (body.action === "feedback" || body.action === "message") {
+    await syncActivities(admin, userId).catch((err) => console.error("Strava sync failed", err));
+
     let task: string;
     if (body.action === "feedback") {
       const { data: workout } = await admin.from("workouts").select("id, date, title")
         .eq("id", body.workoutId).eq("user_id", userId).maybeSingle();
       if (!workout) throw new HttpError(404, "Workout not found");
-      task = `The athlete just logged feedback for "${workout.title}" on ${workout.date} (id ${workout.id}; see the session history above). Review it in the context of recent training. Reply briefly with what you noticed. Only change upcoming sessions if the evidence calls for it (for example the load was clearly too hard or too easy, pain was reported, or a session was missed and the week needs rebalancing). Small, targeted changes are better than rewriting the week.`;
+      task = `The athlete just logged feedback for "${workout.title}" on ${workout.date} (id ${workout.id}; see the session history above). Review it in the context of recent training. Reply briefly with what you noticed. Only change the remaining sessions of this week if the evidence calls for it (for example the load was clearly too hard or too easy, pain was reported, or a session was missed and the week needs rebalancing). Small, targeted changes are better than rewriting the week; bigger adjustments belong in next week's plan, written on Sunday.`;
     } else {
       const text = typeof body.text === "string" ? body.text.trim().slice(0, 4000) : "";
       if (!text) throw new HttpError(400, "Message is empty");
       await admin.from("coach_messages").insert({ user_id: userId, role: "athlete", content: text });
-      task = `The athlete sent you this message (also the last entry in the conversation above):\n"${text}"\nReply to them. If it affects their training (schedule changes, travel, fatigue, pain, new goals, equipment), adjust the upcoming sessions accordingly.`;
+      task = `The athlete sent you this message (also the last entry in the conversation above):\n"${text}"\nReply to them. If it affects their training (schedule changes, travel, fatigue, pain, new goals, equipment), adjust the upcoming sessions accordingly, and keep it in your notes for next week's plan.`;
     }
 
     const ctx = await buildContext(admin, userId, today);
-    const result = await adaptPlan(ctx.text, `${task}\nYou may add sessions dated ${today} to ${addDays(today, 27)}, and replace or remove only upcoming sessions whose status is 'planned'.`);
+    // Only the weeks already written can change; future weeks are written on Sundays.
+    const horizon = ctx.lastScheduledDate && ctx.lastScheduledDate > sundayOf(today) ? ctx.lastScheduledDate : sundayOf(today);
+    const result = await adaptPlan(ctx.text, `${task}\nYou may add sessions dated ${today} to ${horizon}, and replace or remove only upcoming sessions whose status is 'planned'.`);
 
     let applied = 0;
-    const horizon = addDays(today, 27);
+    const planId = ctx.plan?.id ?? null;
     for (const change of result.changes) {
-      change.action = change.action.trim().toLowerCase();
+      const action = change.action.trim().toLowerCase();
       const target = change.workout_id ? ctx.editable.get(change.workout_id) : undefined;
-      if (change.action === "remove" && target) {
+      if (action === "remove" && target) {
         await admin.from("workouts").delete().eq("id", target.id).eq("user_id", userId);
         applied++;
-      } else if (change.action === "replace" && target && change.workout && inWindow(change.workout.date, today, horizon)) {
+      } else if (action === "replace" && target && change.workout && inWindow(change.workout.date, today, horizon)) {
         const { plan_id: _p, user_id: _u, position: _pos, status: _s, ...fields } =
-          toRow(userId, ctx.planId, change.workout, 0, change.reason);
+          toRow(userId, planId, change.workout, 0, change.reason);
         await admin.from("workouts").update(fields).eq("id", target.id).eq("user_id", userId);
         applied++;
-      } else if (change.action === "add" && change.workout && inWindow(change.workout.date, today, horizon)) {
-        await admin.from("workouts").insert(toRow(userId, ctx.planId, change.workout, 9, change.reason));
+      } else if (action === "add" && change.workout && inWindow(change.workout.date, today, horizon)) {
+        await admin.from("workouts").insert(toRow(userId, planId, change.workout, 9, change.reason));
         applied++;
       }
     }

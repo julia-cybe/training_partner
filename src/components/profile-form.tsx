@@ -19,8 +19,11 @@ const LEVELS: Profile['experience'][] = ['beginner', 'intermediate', 'advanced',
 export const emptyProfile = (id: string): Profile => ({
   id, display_name: '', goals: '', experience: 'intermediate', focus: ['crossfit'], training_days: 5,
   session_minutes: 60, equipment: 'Full CrossFit box: barbell, rig, rower, bike, ski, dumbbells, kettlebells',
-  benchmarks: '', injuries: '', event_name: null, event_date: null, units: 'kg',
+  benchmarks: '', injuries: '', event_name: null, event_date: null, units: 'kg', timezone: deviceTimeZone(),
 });
+
+/** The device's IANA time zone; the weekly plan is written on Sunday evening in this zone. */
+export const deviceTimeZone = () => Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
 
 export function ProfileForm({ initial, submitLabel, onSaved }: {
   initial: Profile; submitLabel: string; onSaved: () => void | Promise<void>;
@@ -38,7 +41,7 @@ export function ProfileForm({ initial, submitLabel, onSaved }: {
     setError(null);
     try {
       if (p.event_date && !/^\d{4}-\d{2}-\d{2}$/.test(p.event_date)) throw new Error('Event date must be YYYY-MM-DD');
-      await saveProfile({ ...p, event_name: p.event_name || null, event_date: p.event_date || null });
+      await saveProfile({ ...p, event_name: p.event_name || null, event_date: p.event_date || null, timezone: deviceTimeZone() });
       await onSaved();
     } catch (e) {
       setError(errorMessage(e));

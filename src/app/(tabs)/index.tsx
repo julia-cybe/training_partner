@@ -46,6 +46,9 @@ export default function CalendarScreen() {
 
   const dayWorkouts = byDate.get(selected) ?? [];
   const hasUpcoming = workouts.some((w) => w.date >= today());
+  // Weeks after the last written one are written on the Sunday before them.
+  const lastWritten = workouts.reduce((max, w) => (w.date > max ? w.date : max), '');
+  const notWrittenYet = hasUpcoming && selected > lastWritten && startOfWeek(selected) > startOfWeek(lastWritten);
 
   return (
     <Screen>
@@ -79,7 +82,11 @@ export default function CalendarScreen() {
             <WorkoutCard key={w.id} workout={w} onPress={() => router.push({ pathname: '/workout/[id]', params: { id: w.id } })} />
           ))}
 
-          {dayWorkouts.length === 0 && (
+          {dayWorkouts.length === 0 && notWrittenYet && (
+            <Empty icon="time-outline" title={`Your coach writes this week on ${longLabel(addDays(startOfWeek(selected), -1))} evening`} />
+          )}
+
+          {dayWorkouts.length === 0 && !notWrittenYet && (
             hasUpcoming || selected < today() ? (
               <Empty icon="bed-outline" title={selected < today() ? 'Nothing was scheduled' : 'Rest day. Recover well.'} />
             ) : (

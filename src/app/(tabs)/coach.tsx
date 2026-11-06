@@ -3,27 +3,36 @@ import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
 import { ActivityIndicator, StyleSheet, Text, TextInput, View } from 'react-native';
 
-import { Body, Button, Card, Chip, ErrorText, errorMessage, Label, Screen, Title } from '@/components/ui';
+import { Body, Button, Card, ErrorText, errorMessage, Label, Screen, Title } from '@/components/ui';
 import { colors, radius, space } from '@/constants/theme';
-import { getActivePlan, getCoachMemory, getMessages, messageCoach, requestPlan } from '@/lib/api';
-import { longLabel } from '@/lib/dates';
+import {
+  getActivePlan, getCoachMemory, getLatestWeeklyRun, getMessages, messageCoach, startBlock, type WeeklyRun, writeNextWeek,
+} from '@/lib/api';
+import { addDays, longLabel, startOfWeek, today } from '@/lib/dates';
 import type { CoachMessage, Plan } from '@/lib/types';
+
+/** 1-based week number of today within a block starting on `start` (a Monday). */
+const weekOfBlock = (start: string) =>
+  Math.max(1, Math.floor((Date.parse(startOfWeek(today())) - Date.parse(start)) / (7 * 86400000)) + 1);
 
 export default function CoachScreen() {
   const [plan, setPlan] = useState<Plan | null>(null);
   const [memory, setMemory] = useState('');
   const [messages, setMessages] = useState<CoachMessage[]>([]);
-  const [weeks, setWeeks] = useState(2);
+  const [lastRun, setLastRun] = useState<WeeklyRun | null>(null);
   const [request, setRequest] = useState('');
   const [text, setText] = useState('');
-  const [busy, setBusy] = useState<null | 'plan' | 'extend' | 'message'>(null);
+  const [busy, setBusy] = useState<null | 'plan' | 'next' | 'message'>(null);
   const [showNotes, setShowNotes] = useState(false);
+  const [showOutline, setShowOutline] = useState(false);
+  const nextMonday = addDays(startOfWeek(today()), 7);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
-      const [p, m, msgs] = await Promise.all([getActivePlan(), getCoachMemory(), getMessages()]);
+      const [p, m, msgs, run] = await Promise.all([getActivePlan(), getCoachMemory(), getMessages(), getLatestWeeklyRun()]);
       setPlan(p);
+      setLastRun(run);
       setMemory(m);
       setMessages(msgs);
     } catch (e) {
@@ -33,7 +42,7 @@ export default function CoachScreen() {
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
-  const run = async (kind: 'plan' | 'extend' | 'message') => {
+  const run = async (kind: 'plan' | 'next' | 'message') => {
     setBusy(kind);
     setError(null);
     try {
@@ -41,7 +50,8 @@ export default function CoachScreen() {
         await messageCoach(text.trim());
         setText('');
       } else {
-        await requestPlan({ weeks, request: request.trim() || undefined, mode: kind === 'plan' ? 'new' : 'extend' });
+        const note = request.trim() || undefined;
+        await (kind === 'plan' ? startBlock(note) : writeNextWeek(note));
         setRequest('');
       }
       await load();
@@ -59,40 +69,54 @@ export default function CoachScreen() {
 
       {plan ? (
         <Card>
-          <Label>Current block · until {longLabel(plan.end_date)}</Label>
+          <Label>Current block · week {weekOfBlock(plan.start_date)} of {plan.weeks}</Label>
           <Text style={styles.planTitle}>{plan.title}</Text>
           {plan.goal ? <Body>{plan.goal}</Body> : null}
           {plan.rationale ? <Body muted>{plan.rationale}</Body> : null}
+          {plan.outline ? (
+            <>
+              <Button variant="ghost" title={showOutline ? 'Hide block outline' : 'Show block outline'}
+                icon={showOutline ? 'chevron-up' : 'list'} onPress={() => setShowOutline(!showOutline)}
+                style={{ alignSelf: 'flex-start', paddingHorizontal: 0, minHeight: 32 }} />
+              {showOutline && <Body muted>{plan.outline}</Body>}
+            </>
+          ) : null}
         </Card>
       ) : (
         <Card>
           <Label>No plan yet</Label>
-          <Body>Your coach will write a training block from your profile, then adjust it as you log sessions and train with your Garmin.</Body>
+          <Body>Your coach designs a training block from your profile and writes the first week. After that, every Sunday evening it writes the next week based on how the last one went.</Body>
         </Card>
       )}
 
       <Card style={{ gap: space.md }}>
-        <Label>{plan ? 'Plan ahead' : 'Create your first plan'}</Label>
-        <View style={{ flexDirection: 'row', gap: space.sm, alignItems: 'center' }}>
-          <Body muted>Weeks</Body>
-          {[1, 2, 3, 4].map((n) => <Chip key={n} label={String(n)} selected={weeks === n} onPress={() => setWeeks(n)} />)}
+        <View style={styles.schedule}>
+          <Ionicons name="time-outline" size={18} color={colors.accent} />
+          <Body style={{ flex: 1 }}>
+            {plan
+              ? `Next week (from ${longLabel(nextMonday)}) is written automatically on Sunday evening.`
+              : 'Start a block to begin weekly coaching.'}
+          </Body>
         </View>
+        {lastRun?.status === 'failed' && (
+          <Body style={{ color: colors.danger }}>Last automatic run failed: {lastRun.detail}</Body>
+        )}
         <TextInput
           value={request}
           onChangeText={setRequest}
           multiline
-          placeholder="Anything specific? e.g. more running, no handstand work, deload week"
+          placeholder="Anything specific? e.g. more running, no handstand work, I'm away on Friday"
           placeholderTextColor={colors.textFaint}
           style={styles.input}
         />
         {plan && (
-          <Button title={`Program next ${weeks} week${weeks > 1 ? 's' : ''}`} icon="arrow-forward" onPress={() => run('extend')}
-            loading={busy === 'extend'} disabled={busy !== null} />
+          <Button title="Write next week now" icon="arrow-forward" variant="secondary" onPress={() => run('next')}
+            loading={busy === 'next'} disabled={busy !== null} />
         )}
-        <Button title={plan ? 'Start a new block' : 'Write my plan'} icon="sparkles" variant={plan ? 'secondary' : 'primary'}
+        <Button title={plan ? 'Start a new block' : 'Start my training'} icon="sparkles" variant={plan ? 'secondary' : 'primary'}
           onPress={() => run('plan')} loading={busy === 'plan'} disabled={busy !== null} />
-        {(busy === 'plan' || busy === 'extend') && (
-          <Body muted>Your coach is writing your sessions. This can take a minute or two.</Body>
+        {(busy === 'plan' || busy === 'next') && (
+          <Body muted>Your coach is writing your week. This can take a minute.</Body>
         )}
       </Card>
 
@@ -149,5 +173,6 @@ const styles = StyleSheet.create({
   mine: { alignSelf: 'flex-end', backgroundColor: colors.accent, borderBottomRightRadius: 4 },
   theirs: { alignSelf: 'flex-start', backgroundColor: colors.surface, borderBottomLeftRadius: 4, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border },
   bubbleText: { color: colors.text, fontSize: 15, lineHeight: 21 },
+  schedule: { flexDirection: 'row', gap: space.sm, alignItems: 'flex-start' },
   composer: { flexDirection: 'row', gap: space.sm, alignItems: 'flex-end' },
 });

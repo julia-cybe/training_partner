@@ -1,7 +1,8 @@
 import type { Session } from '@supabase/supabase-js';
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useState } from 'react';
 
-import { getProfile } from '@/lib/api';
+import { deviceTimeZone } from '@/components/profile-form';
+import { getProfile, saveProfile } from '@/lib/api';
 import { supabase } from '@/lib/supabase';
 import type { Profile } from '@/lib/types';
 
@@ -20,7 +21,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   const loadProfile = useCallback(async (s: Session | null) => {
-    setProfile(s ? await getProfile(s.user.id).catch(() => null) : null);
+    const p = s ? await getProfile(s.user.id).catch(() => null) : null;
+    // Keep the time zone current (it decides when Sunday's weekly plan is written).
+    if (p && p.timezone !== deviceTimeZone()) {
+      p.timezone = deviceTimeZone();
+      saveProfile(p).catch(() => undefined);
+    }
+    setProfile(p);
   }, []);
 
   useEffect(() => {

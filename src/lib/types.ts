@@ -58,6 +58,7 @@ export interface Profile {
   event_name: string | null;
   event_date: string | null;
   units: 'kg' | 'lb';
+  timezone: string;
 }
 
 export interface Plan {
@@ -65,6 +66,8 @@ export interface Plan {
   title: string;
   goal: string;
   rationale: string;
+  outline: string;
+  weeks: number;
   start_date: string;
   end_date: string;
 }
