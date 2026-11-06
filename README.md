@@ -1,17 +1,17 @@
 # Training Partner
 
-An AI coach for CrossFit and hybrid training. It writes your training plan, shows it in a calendar like other training apps, reads your feedback after each session and your Garmin Forerunner activities (through Strava), and adapts the plan over time.
+An AI coach for CrossFit and hybrid training. It writes your training plan, shows it in a calendar like other training apps, reads your feedback after each session and your Garmin Forerunner activities and wellness data (through intervals.icu), and adapts the plan over time.
 
 - **App:** Expo (React Native), runs on iPhone/Android (Expo Go) and in the browser
 - **Backend:** Supabase (login, database, Edge Functions)
 - **Coach:** Claude (`claude-opus-5-5`) called from a Supabase Edge Function, so your API key never ships in the app
-- **Garmin:** Forerunner → Garmin Connect → Strava → app
+- **Garmin:** Forerunner → Garmin Connect → intervals.icu (free, official Garmin sync, personal API key) → app
 
 ## How the coach works
 
 1. **Start a block** (Coach tab): Claude reads your profile, designs a training block (usually 4–8 weeks) with a week-by-week outline, and writes **only the first week** in detail.
 2. **Log sessions** (tap a workout): completed/skipped, RPE, energy, soreness, enjoyment, results, notes, and optionally the matching Garmin activity. The coach reviews each log and may tweak the rest of the current week.
-3. **Every Sunday evening** (from 16:00 in your time zone) a scheduled job writes the coming Monday–Sunday. The coach reviews last week (planned vs. done, your feedback, your Garmin/Strava activities), follows the block outline and adjusts to how you actually responded. Its weekly check-in message appears in the Coach tab. When a block ends, it designs the next one.
+3. **Every Sunday evening** (from 16:00 in your time zone) a scheduled job writes the coming Monday–Sunday. The coach reviews last week (planned vs. done, your feedback, your Garmin activities, resting HR, HRV and sleep), follows the block outline and adjusts to how you actually responded. Its weekly check-in message appears in the Coach tab. When a block ends, it designs the next one.
 4. **Message the coach** about travel, fatigue, pain or new goals. It replies, adjusts the current week, and keeps it in mind for next Sunday.
 5. **Coaching notes**: after every interaction the coach rewrites its notes about you (maxes, paces, how you respond, injuries). These are its long-term memory. See them under "What your coach knows about you".
 
@@ -19,7 +19,7 @@ If Sunday's run fails it retries every 15 minutes (3 attempts) and catches up on
 
 ## Status of the hosted backend
 
-The Supabase project `hnaewgazztrozynchzdk` (EU West) is set up: tables, row-level security, the five Edge Functions, the 15-minute schedule, and the `CRON_SECRET`/Vault secrets. Copy `.env.example` to `.env` and add the publishable key from Project Settings → API Keys. Still needed in the Supabase dashboard (Edge Functions → Secrets): `ANTHROPIC_API_KEY`, `STRAVA_CLIENT_ID`, `STRAVA_CLIENT_SECRET`.
+The Supabase project `hnaewgazztrozynchzdk` (EU West) is set up: tables, row-level security, the Edge Functions (`coach`, `garmin`, `weekly-plan`), the 15-minute schedule, and the `CRON_SECRET`/Vault secrets. Copy `.env.example` to `.env` and add the publishable key from Project Settings → API Keys. Still needed in the Supabase dashboard (Edge Functions → Secrets): `ANTHROPIC_API_KEY`.
 
 ## Setup (for a new Supabase project)
 
@@ -34,18 +34,16 @@ The Supabase project `hnaewgazztrozynchzdk` (EU West) is set up: tables, row-lev
    ```
 3. Copy `.env.example` to `.env` and fill in your project URL and publishable key (Project Settings → API Keys).
 
-### 2. Strava app (for your Garmin data)
+### 2. Garmin via intervals.icu
 
-1. In the **Garmin Connect** app: Settings → Connected Apps → Strava, so Forerunner activities upload to Strava automatically.
-2. Create an API app at [strava.com/settings/api](https://www.strava.com/settings/api).
-   Set **Authorization Callback Domain** to `YOUR-PROJECT-REF.supabase.co`.
-3. Note the Client ID and Client Secret.
+1. Create a free account at [intervals.icu](https://intervals.icu) and connect Garmin under Settings → Connections.
+2. In the app's Activities tab, enter your athlete ID and API key from intervals.icu → Settings → Developer Settings. The key is stored server-side only.
 
 ### 3. Edge Function secrets and deploy
 
 ```bash
 cp supabase/functions/.env.example supabase/functions/.env
-# fill in ANTHROPIC_API_KEY, STRAVA_CLIENT_ID, STRAVA_CLIENT_SECRET
+# fill in ANTHROPIC_API_KEY and CRON_SECRET
 supabase secrets set --env-file supabase/functions/.env
 supabase functions deploy
 ```
@@ -72,7 +70,7 @@ Press `w` for the browser, or scan the QR code with **Expo Go** on your phone.
 src/app/                 screens (Expo Router)
   (tabs)/index.tsx       calendar (week / month)
   (tabs)/coach.tsx       plan generation + chat with coach
-  (tabs)/activities.tsx  Strava connection + Garmin activities
+  (tabs)/activities.tsx  Garmin connection (intervals.icu) + activities
   (tabs)/profile.tsx     athlete profile
   workout/[id].tsx       workout detail + feedback log
 src/components/          UI components
@@ -82,13 +80,12 @@ supabase/functions/
   coach/                 Claude coach: new block / next week / feedback / message
   weekly-plan/           Sunday job (pg_cron, every 15 min) that writes next week
   _shared/planning.ts    block and weekly planning logic
-  strava-connect/        starts Strava OAuth
-  strava-callback/       Strava OAuth redirect target
-  strava-sync/           pulls activities, disconnects
+  garmin/                connect / sync / disconnect intervals.icu
 ```
 
 ## Notes
 
 - Writing a week takes about a minute; the weekly job runs in the background so nothing waits on it.
-- The coach syncs Strava before every plan and review, so recent Garmin sessions are always included.
+- The coach syncs intervals.icu before every plan and review, so recent Garmin sessions and wellness are always included.
+- Activities that reached intervals.icu from Strava (rather than directly from Garmin) may come through with little detail, so connect Garmin directly in intervals.icu.
 - Checks: `npm run typecheck` (app) and `deno check supabase/functions/*/index.ts` (functions).

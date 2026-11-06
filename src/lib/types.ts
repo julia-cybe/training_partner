@@ -25,7 +25,7 @@ export interface Feedback {
   duration_min: number | null;
   results: string;
   notes: string;
-  activity_id: number | null;
+  activity_id: string | null;
 }
 
 export interface Workout {
@@ -80,7 +80,7 @@ export interface CoachMessage {
 }
 
 export interface Activity {
-  id: number;
+  id: string;
   name: string;
   sport_type: string;
   start_date_local: string;
@@ -90,10 +90,11 @@ export interface Activity {
   max_hr: number | null;
   average_speed: number | null;
   elevation_gain_m: number | null;
-  suffer_score: number | null;
+  training_load: number | null;
 }
 
-export interface StravaConnection {
+export interface GarminConnection {
+  athlete_id: string;
   athlete_name: string | null;
   connected_at: string;
   last_synced_at: string | null;

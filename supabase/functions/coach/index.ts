@@ -6,7 +6,7 @@
 import { adaptPlan, buildContext } from "../_shared/coach.ts";
 import { addDays, adminClient, handle, HttpError, isoDate, json, requireUser } from "../_shared/http.ts";
 import { inWindow, mondayOf, saveMemoryAndReply, startBlock, sundayOf, toRow, writeNextWeek } from "../_shared/planning.ts";
-import { syncActivities } from "../_shared/strava.ts";
+import { syncActivities } from "../_shared/intervals.ts";
 
 Deno.serve(handle(async (req) => {
   const admin = adminClient();
@@ -37,7 +37,7 @@ Deno.serve(handle(async (req) => {
 
   // -------------------------------------------------------------------------
   if (body.action === "feedback" || body.action === "message") {
-    await syncActivities(admin, userId).catch((err) => console.error("Strava sync failed", err));
+    await syncActivities(admin, userId).catch((err) => console.error("Garmin sync failed", err));
 
     let task: string;
     if (body.action === "feedback") {

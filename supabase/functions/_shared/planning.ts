@@ -3,7 +3,7 @@
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2.119.0";
 import { buildContext, type WorkoutDraft, writeBlock, writeWeek } from "./coach.ts";
 import { addDays, HttpError } from "./http.ts";
-import { syncActivities } from "./strava.ts";
+import { syncActivities } from "./intervals.ts";
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const KINDS = ["strength", "metcon", "run", "hybrid", "endurance", "gymnastics", "recovery", "rest"];
@@ -80,7 +80,7 @@ export interface WeekResult {
 export async function startBlock(
   admin: SupabaseClient, userId: string, today: string, start: string, request: string, previousBlockEnded = false,
 ): Promise<WeekResult> {
-  await syncActivities(admin, userId).catch((err) => console.error("Strava sync failed", err));
+  await syncActivities(admin, userId).catch((err) => console.error("Garmin sync failed", err));
   const ctx = await buildContext(admin, userId, today);
 
   let end = sundayOf(start);
@@ -133,7 +133,7 @@ export async function writeNextWeek(
     return startBlock(admin, userId, today, weekStart, request, Boolean(plan));
   }
 
-  await syncActivities(admin, userId).catch((err) => console.error("Strava sync failed", err));
+  await syncActivities(admin, userId).catch((err) => console.error("Garmin sync failed", err));
   const ctx = await buildContext(admin, userId, today);
   const weekEnd = addDays(weekStart, 6);
   const weekNumber = Math.floor((Date.parse(weekStart) - Date.parse(plan.start_date)) / (7 * 86400_000)) + 1;
@@ -141,7 +141,7 @@ export async function writeNextWeek(
 
   const task = [
     `Write week ${weekNumber} of ${plan.weeks} of the current block: sessions dated ${weekStart} (Monday) to ${weekEnd} (Sunday) inclusive.`,
-    `First review the week of ${lastWeek} to ${addDays(lastWeek, 6)}: what was planned versus what was done, the athlete's feedback (RPE, energy, soreness, notes, results) and their Garmin/Strava activities. Then write the coming week following the block outline, adjusted to that evidence: progress what went well, pull back where fatigue, pain or missed sessions call for it.`,
+    `First review the week of ${lastWeek} to ${addDays(lastWeek, 6)}: what was planned versus what was done, the athlete's feedback (RPE, energy, soreness, notes, results) and their Garmin activities and wellness (resting HR, HRV, sleep). Then write the coming week following the block outline, adjusted to that evidence: progress what went well, pull back where fatigue, pain or missed sessions call for it.`,
     "Your message is the weekly check-in the athlete reads on Sunday: a short recap of last week and the focus of the coming week.",
     request ? `The athlete's request: ${request}` : "",
   ].filter(Boolean).join("\n");

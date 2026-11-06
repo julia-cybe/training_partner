@@ -38,7 +38,6 @@ function RootNavigator() {
       <Stack.Protected guard={ready}>
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen name="workout/[id]" options={{ title: '', headerBackTitle: 'Back' }} />
-        <Stack.Screen name="strava-return" options={{ headerShown: false }} />
       </Stack.Protected>
     </Stack>
   );

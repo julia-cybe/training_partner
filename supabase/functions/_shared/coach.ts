@@ -66,14 +66,14 @@ const AdaptOutput = z.object({
 // ---------------------------------------------------------------------------
 // Prompt
 // ---------------------------------------------------------------------------
-const SYSTEM = `You are an experienced CrossFit and hybrid-training coach (strength, conditioning, gymnastics, running, HYROX-style work) coaching one athlete through an app. You write their training, read their feedback and their Garmin data (synced through Strava), and adapt over time.
+const SYSTEM = `You are an experienced CrossFit and hybrid-training coach (strength, conditioning, gymnastics, running, HYROX-style work) coaching one athlete through an app. You write their training, read their feedback and their Garmin data (activities and daily wellness, synced through intervals.icu), and adapt over time.
 
 How you coach:
 - Program with clear intent: each session has a purpose and each week has a rhythm that balances strength, metcons, engine/aerobic work, running, skill and recovery according to the athlete's goals and focus.
 - Progress deliberately (load, volume, density, pace) and plan lighter weeks when accumulated fatigue calls for it.
 - Respect the athlete's available days, session length, equipment and injuries. Never program around an injury carelessly; offer substitutions.
 - Be specific: sets x reps with %1RM or RPE, rest, time caps, target paces or heart-rate zones, and scaling options. Use the athlete's units (kg or lb) and metric distances unless told otherwise.
-- Use the evidence: RPE, soreness, energy, completion, results and notes from feedback, plus Strava activities (pace, heart rate, duration, relative effort). Unplanned activities count toward training load. If sessions consistently feel too hard or too easy, adjust.
+- Use the evidence: RPE, soreness, energy, completion, results and notes from feedback, plus Garmin activities (pace, heart rate, duration, training load) and daily wellness (resting HR, HRV, sleep): rising resting HR, falling HRV or poor sleep are signs to pull back. Unplanned activities count toward training load. If sessions consistently feel too hard or too easy, adjust.
 - Keep warm-ups short and relevant; include a cool-down or mobility note when useful.
 - You write one week at a time. Each new week is written on Sunday from the outline of the block plus how the previous week actually went, so adjust the coming week to the evidence rather than following the outline blindly.
 - Only schedule sessions on training days. Leave rest days empty (don't create 'rest' workouts) unless an active-recovery session is genuinely useful.
@@ -135,8 +135,21 @@ function formatActivity(a: Record<string, number | string | null>): string {
   if (a.average_hr) parts.push(`avg HR ${Math.round(Number(a.average_hr))}`);
   if (a.max_hr) parts.push(`max HR ${Math.round(Number(a.max_hr))}`);
   if (a.elevation_gain_m) parts.push(`+${Math.round(Number(a.elevation_gain_m))} m`);
-  if (a.suffer_score) parts.push(`relative effort ${a.suffer_score}`);
+  if (a.training_load) parts.push(`training load ${Math.round(Number(a.training_load))}`);
   return `- ${parts.join(" · ")}`;
+}
+
+function formatWellness(w: Record<string, number | string | null>): string {
+  const parts = [
+    w.resting_hr != null ? `resting HR ${Math.round(Number(w.resting_hr))}` : null,
+    w.hrv != null ? `HRV ${Math.round(Number(w.hrv))}` : null,
+    w.sleep_hours != null ? `sleep ${w.sleep_hours} h` : null,
+    w.sleep_score != null ? `sleep score ${w.sleep_score}` : null,
+    w.readiness != null ? `readiness ${w.readiness}` : null,
+    w.fitness != null ? `fitness ${Math.round(Number(w.fitness))}` : null,
+    w.fatigue != null ? `fatigue ${Math.round(Number(w.fatigue))}` : null,
+  ].filter(Boolean);
+  return parts.length ? `- ${w.date}: ${parts.join(", ")}` : "";
 }
 
 export interface ActivePlan {
@@ -155,7 +168,7 @@ export interface CoachContext {
 }
 
 export async function buildContext(admin: SupabaseClient, userId: string, today: string): Promise<CoachContext> {
-  const [profileRes, memoryRes, planRes, pastRes, upcomingRes, activitiesRes, messagesRes] = await Promise.all([
+  const [profileRes, memoryRes, planRes, pastRes, upcomingRes, activitiesRes, messagesRes, wellnessRes] = await Promise.all([
     admin.from("profiles").select("*").eq("id", userId).maybeSingle(),
     admin.from("coach_memory").select("athlete_summary").eq("user_id", userId).maybeSingle(),
     admin.from("plans").select("*").eq("user_id", userId).eq("status", "active").order("created_at", { ascending: false }).limit(1).maybeSingle(),
@@ -163,10 +176,12 @@ export async function buildContext(admin: SupabaseClient, userId: string, today:
       .gte("date", addDays(today, -28)).lt("date", today).order("date"),
     admin.from("workouts").select("*, workout_feedback(*)").eq("user_id", userId)
       .gte("date", today).order("date").order("position"),
-    admin.from("activities").select("name, sport_type, start_date_local, distance_m, moving_time_s, average_speed, average_hr, max_hr, elevation_gain_m, suffer_score")
+    admin.from("activities").select("name, sport_type, start_date_local, distance_m, moving_time_s, average_speed, average_hr, max_hr, elevation_gain_m, training_load")
       .eq("user_id", userId).gte("start_date", `${addDays(today, -28)}T00:00:00Z`).order("start_date"),
     admin.from("coach_messages").select("role, content, created_at").eq("user_id", userId)
       .order("created_at", { ascending: false }).limit(12),
+    admin.from("wellness").select("date, resting_hr, hrv, sleep_hours, sleep_score, readiness, fitness, fatigue")
+      .eq("user_id", userId).gte("date", addDays(today, -14)).order("date"),
   ]);
 
   const profile = profileRes.data;
@@ -201,7 +216,8 @@ export async function buildContext(admin: SupabaseClient, userId: string, today:
       ? `${planRes.data.title} (${planRes.data.weeks} weeks, ${planRes.data.start_date} to ${planRes.data.end_date})\nGoal: ${planRes.data.goal}\nRationale: ${planRes.data.rationale}\nOutline:\n${planRes.data.outline || "(none)"}`
       : "(no active block)"}`,
     `# Last 4 weeks of sessions with feedback\n${(pastRes.data ?? []).map((w) => formatWorkout(w as WorkoutRow, false)).join("\n") || "(none)"}`,
-    `# Strava / Garmin activities, last 4 weeks\n${(activitiesRes.data ?? []).map(formatActivity).join("\n") || "(none or Strava not connected)"}`,
+    `# Garmin activities, last 4 weeks\n${(activitiesRes.data ?? []).map(formatActivity).join("\n") || "(none, or Garmin not connected)"}`,
+    `# Garmin daily wellness, last 2 weeks\n${(wellnessRes.data ?? []).map(formatWellness).filter(Boolean).join("\n") || "(none)"}`,
     `# Upcoming scheduled sessions (ids in brackets; only 'planned' ones can be changed)\n${upcoming.map((w) => formatWorkout(w, true)).join("\n") || "(none)"}`,
     `# Recent conversation (newest last)\n${(messagesRes.data ?? []).reverse().map((m) => `${m.role}: ${m.content}`).join("\n") || "(none)"}`,
   ];

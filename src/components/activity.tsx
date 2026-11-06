@@ -21,6 +21,7 @@ export function ActivityRow({ activity, showDate = true }: { activity: Activity;
     activity.moving_time_s ? formatDuration(activity.moving_time_s) : null,
     activity.average_speed && /Run/.test(activity.sport_type) ? formatPace(activity.average_speed) : null,
     activity.average_hr ? `♥ ${Math.round(activity.average_hr)}` : null,
+    activity.training_load ? `Load ${Math.round(activity.training_load)}` : null,
   ].filter(Boolean);
   return (
     <View style={styles.row}>

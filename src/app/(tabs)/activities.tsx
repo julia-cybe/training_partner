@@ -1,26 +1,25 @@
-import * as Linking from 'expo-linking';
+import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from 'expo-router';
-import * as WebBrowser from 'expo-web-browser';
 import { useCallback, useState } from 'react';
-import { Platform, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 
 import { ActivityRow } from '@/components/activity';
-import { Body, Button, Card, Empty, ErrorText, errorMessage, Label, Screen, Title } from '@/components/ui';
+import { Body, Button, Card, Empty, ErrorText, errorMessage, Field, Label, Screen, Title } from '@/components/ui';
 import { colors, space } from '@/constants/theme';
-import { disconnectStrava, getActivities, getStravaConnection, startStravaConnect, syncStrava } from '@/lib/api';
-import type { Activity, StravaConnection } from '@/lib/types';
-
-const STRAVA_ORANGE = '#FC4C02';
+import { connectGarmin, disconnectGarmin, getActivities, getGarminConnection, syncGarmin } from '@/lib/api';
+import type { Activity, GarminConnection } from '@/lib/types';
 
 export default function ActivitiesScreen() {
-  const [connection, setConnection] = useState<StravaConnection | null>(null);
+  const [connection, setConnection] = useState<GarminConnection | null>(null);
   const [activities, setActivities] = useState<Activity[]>([]);
+  const [athleteId, setAthleteId] = useState('');
+  const [apiKey, setApiKey] = useState('');
   const [busy, setBusy] = useState<null | 'connect' | 'sync' | 'disconnect'>(null);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
-      const [c, a] = await Promise.all([getStravaConnection(), getActivities()]);
+      const [c, a] = await Promise.all([getGarminConnection(), getActivities()]);
       setConnection(c);
       setActivities(a);
     } catch (e) {
@@ -35,21 +34,12 @@ export default function ActivitiesScreen() {
     setError(null);
     try {
       if (kind === 'connect') {
-        const returnUrl = Linking.createURL('strava-return');
-        const { url } = await startStravaConnect(returnUrl);
-        if (Platform.OS === 'web') {
-          window.location.assign(url); // comes back to /strava-return
-          return;
-        }
-        const result = await WebBrowser.openAuthSessionAsync(url, returnUrl);
-        if (result.type === 'success') {
-          const { queryParams } = Linking.parse(result.url);
-          if (queryParams?.strava === 'error') throw new Error(String(queryParams.message ?? 'Strava connection failed'));
-        }
+        await connectGarmin(athleteId.trim(), apiKey.trim());
+        setApiKey('');
       } else if (kind === 'sync') {
-        await syncStrava();
+        await syncGarmin();
       } else {
-        await disconnectStrava();
+        await disconnectGarmin();
       }
       await load();
     } catch (e) {
@@ -65,13 +55,15 @@ export default function ActivitiesScreen() {
 
       <Card>
         <View style={styles.row}>
-          <View style={styles.badge}><Text style={styles.badgeText}>S</Text></View>
+          <View style={styles.badge}><Ionicons name="watch" size={24} color="#fff" /></View>
           <View style={{ flex: 1 }}>
-            <Text style={styles.name}>{connection ? `Strava · ${connection.athlete_name ?? 'connected'}` : 'Connect your Garmin'}</Text>
+            <Text style={styles.name}>
+              {connection ? `Garmin · ${connection.athlete_name ?? connection.athlete_id}` : 'Connect your Garmin'}
+            </Text>
             <Body muted style={{ fontSize: 13 }}>
               {connection
                 ? connection.last_synced_at ? `Last synced ${new Date(connection.last_synced_at).toLocaleString()}` : 'Not synced yet'
-                : 'Through Strava: your coach sees runs and workouts from your Forerunner.'}
+                : 'Through intervals.icu: your coach sees your Forerunner sessions, resting HR, HRV and sleep.'}
             </Body>
           </View>
         </View>
@@ -84,11 +76,17 @@ export default function ActivitiesScreen() {
           </View>
         ) : (
           <>
-            <Button title="Connect with Strava" onPress={() => act('connect')} loading={busy === 'connect'}
-              style={{ backgroundColor: STRAVA_ORANGE }} />
             <Body muted style={{ fontSize: 13 }}>
-              In the Garmin Connect app, link Strava under Settings → Connected Apps so your Forerunner activities upload automatically.
+              1. In intervals.icu, connect Garmin under Settings → Connections.{'\n'}
+              2. Under Settings → Developer Settings, copy your athlete ID and API key.
             </Body>
+            <Field label="Athlete ID" value={athleteId} onChangeText={setAthleteId} placeholder="i12345"
+              autoCapitalize="none" autoCorrect={false} />
+            <Field label="API key" value={apiKey} onChangeText={setApiKey} placeholder="Paste your API key"
+              autoCapitalize="none" autoCorrect={false} secureTextEntry
+              hint="Stored only on the server; the app never shows it again." />
+            <Button title="Connect" onPress={() => act('connect')} loading={busy === 'connect'}
+              disabled={!athleteId.trim() || !apiKey.trim() || busy !== null} />
           </>
         )}
         <ErrorText error={error} />
@@ -108,7 +106,6 @@ export default function ActivitiesScreen() {
 
 const styles = StyleSheet.create({
   row: { flexDirection: 'row', gap: space.md, alignItems: 'center' },
-  badge: { width: 44, height: 44, borderRadius: 10, backgroundColor: STRAVA_ORANGE, alignItems: 'center', justifyContent: 'center' },
-  badgeText: { color: '#fff', fontWeight: '900', fontSize: 22 },
+  badge: { width: 44, height: 44, borderRadius: 10, backgroundColor: colors.run, alignItems: 'center', justifyContent: 'center' },
   name: { color: colors.text, fontSize: 16, fontWeight: '700' },
 });

@@ -4,15 +4,8 @@ project_id = "training-partner"
 [functions.coach]
 verify_jwt = true
 
-[functions.strava-connect]
+[functions.garmin]
 verify_jwt = true
-
-[functions.strava-sync]
-verify_jwt = true
-
-# Strava redirects the browser here, so it can't carry a Supabase JWT.
-[functions.strava-callback]
-verify_jwt = false
 
 # Called by pg_cron with the x-cron-secret header instead of a user JWT.
 [functions.weekly-plan]

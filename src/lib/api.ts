@@ -3,7 +3,7 @@ import { FunctionsHttpError } from '@supabase/supabase-js';
 import { today } from './dates';
 import { supabase } from './supabase';
 import type {
-  Activity, CoachMessage, Feedback, Plan, Profile, StravaConnection, Workout,
+  Activity, CoachMessage, Feedback, GarminConnection, Plan, Profile, Workout,
 } from './types';
 
 async function invoke<T>(name: string, body: Record<string, unknown>): Promise<T> {
@@ -100,9 +100,9 @@ export const sendFeedbackToCoach = (workoutId: string) =>
 export const messageCoach = (text: string) =>
   invoke<CoachReply>('coach', { action: 'message', today: today(), text });
 
-// --- Strava ----------------------------------------------------------------
-export async function getStravaConnection(): Promise<StravaConnection | null> {
-  return must(await supabase.from('strava_connections').select('*').maybeSingle());
+// --- Garmin (via intervals.icu) ---------------------------------------------
+export async function getGarminConnection(): Promise<GarminConnection | null> {
+  return must(await supabase.from('intervals_connections').select('*').maybeSingle());
 }
 
 export async function getActivities(limit = 50): Promise<Activity[]> {
@@ -122,9 +122,9 @@ export async function getActivitiesOn(date: string): Promise<Activity[]> {
   );
 }
 
-export const startStravaConnect = (returnUrl: string) =>
-  invoke<{ url: string }>('strava-connect', { returnUrl });
+export const connectGarmin = (athleteId: string, apiKey: string) =>
+  invoke<{ connected: boolean; athleteName: string | null; stored: number }>('garmin', { action: 'connect', athleteId, apiKey });
 
-export const syncStrava = () => invoke<{ connected: boolean; stored: number }>('strava-sync', {});
+export const syncGarmin = () => invoke<{ connected: boolean; stored: number }>('garmin', { action: 'sync' });
 
-export const disconnectStrava = () => invoke<{ disconnected: boolean }>('strava-sync', { disconnect: true });
+export const disconnectGarmin = () => invoke<{ disconnected: boolean }>('garmin', { action: 'disconnect' });
