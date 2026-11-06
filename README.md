@@ -17,7 +17,11 @@ An AI coach for CrossFit and hybrid training. It writes your training plan, show
 
 If Sunday's run fails it retries every 15 minutes (3 attempts) and catches up on Monday morning. "Write next week now" in the Coach tab does it on demand.
 
-## Setup
+## Status of the hosted backend
+
+The Supabase project `hnaewgazztrozynchzdk` (EU West) is set up: tables, row-level security, the five Edge Functions, the 15-minute schedule, and the `CRON_SECRET`/Vault secrets. Copy `.env.example` to `.env` and add the publishable key from Project Settings → API Keys. Still needed in the Supabase dashboard (Edge Functions → Secrets): `ANTHROPIC_API_KEY`, `STRAVA_CLIENT_ID`, `STRAVA_CLIENT_SECRET`.
+
+## Setup (for a new Supabase project)
 
 ### 1. Supabase project
 
@@ -28,7 +32,7 @@ If Sunday's run fails it retries every 15 minutes (3 attempts) and catches up on
    supabase link --project-ref YOUR-PROJECT-REF
    supabase db push                 # creates the tables
    ```
-3. Copy `.env.example` to `.env.local` and fill in your project URL and anon key (Project Settings → API).
+3. Copy `.env.example` to `.env` and fill in your project URL and publishable key (Project Settings → API Keys).
 
 ### 2. Strava app (for your Garmin data)
 
