@@ -1,0 +1,15 @@
+# Supabase project config used by `supabase functions deploy` / `supabase db push`.
+project_id = "training-partner"
+
+[functions.coach]
+verify_jwt = true
+
+[functions.strava-connect]
+verify_jwt = true
+
+[functions.strava-sync]
+verify_jwt = true
+
+# Strava redirects the browser here, so it can't carry a Supabase JWT.
+[functions.strava-callback]
+verify_jwt = false
