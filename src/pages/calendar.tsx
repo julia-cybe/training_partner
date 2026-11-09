@@ -1,17 +1,17 @@
-import { router, useFocusEffect } from 'expo-router';
-import { useCallback, useMemo, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import { BedDouble, Clock, Sparkles } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 
 import { ActivityRow } from '@/components/activity';
 import { MonthGrid, WeekStrip } from '@/components/calendar';
-import { Button, Card, Empty, ErrorText, errorMessage, Label, Screen } from '@/components/ui';
+import { Button, Card, Empty, ErrorText, errorMessage, Label, Spinner } from '@/components/ui';
 import { WorkoutCard } from '@/components/workout';
-import { colors, radius, space } from '@/constants/theme';
 import { getActivitiesOn, getWorkouts } from '@/lib/api';
 import { addDays, longLabel, monthLabel, startOfMonth, startOfWeek, today } from '@/lib/dates';
 import type { Activity, Workout } from '@/lib/types';
 
-export default function CalendarScreen() {
+export default function CalendarPage() {
+  const navigate = useNavigate();
   const [selected, setSelected] = useState(today());
   const [view, setView] = useState<'week' | 'month'>('week');
   const [workouts, setWorkouts] = useState<Workout[]>([]);
@@ -36,7 +36,7 @@ export default function CalendarScreen() {
     }
   }, [rangeStart, rangeEnd, selected]);
 
-  useFocusEffect(useCallback(() => { load(); }, [load]));
+  useEffect(() => { load(); }, [load]);
 
   const byDate = useMemo(() => {
     const map = new Map<string, Workout[]>();
@@ -51,49 +51,45 @@ export default function CalendarScreen() {
   const notWrittenYet = hasUpcoming && selected > lastWritten && startOfWeek(selected) > startOfWeek(lastWritten);
 
   return (
-    <Screen>
-      <View style={styles.header}>
-        <View>
+    <>
+      <div className="cal-header">
+        <div>
           <Label>{monthLabel(selected)}</Label>
-          <Text style={styles.title}>{longLabel(selected)}</Text>
-        </View>
-        <View style={styles.toggle}>
+          <h1 className="title">{longLabel(selected)}</h1>
+        </div>
+        <div className="seg" role="group" aria-label="Calendar view">
           {(['week', 'month'] as const).map((v) => (
-            <Pressable key={v} onPress={() => setView(v)} accessibilityRole="button" accessibilityState={{ selected: view === v }}
-              style={[styles.toggleItem, view === v && styles.toggleOn]}>
-              <Text style={[styles.toggleText, view === v && { color: colors.text }]}>{v === 'week' ? 'Week' : 'Month'}</Text>
-            </Pressable>
+            <button key={v} type="button" className={view === v ? 'on' : ''} aria-pressed={view === v} onClick={() => setView(v)}>
+              {v === 'week' ? 'Week' : 'Month'}
+            </button>
           ))}
-        </View>
-      </View>
+        </div>
+      </div>
 
       {view === 'week'
         ? <WeekStrip selected={selected} onSelect={setSelected} byDate={byDate} />
         : <MonthGrid selected={selected} onSelect={setSelected} byDate={byDate} />}
 
       {selected !== today() && (
-        <Button variant="ghost" title="Jump to today" onPress={() => setSelected(today())} style={{ alignSelf: 'flex-start', minHeight: 32, paddingHorizontal: 0 }} />
+        <Button variant="ghost" title="Jump to today" onClick={() => setSelected(today())} style={{ alignSelf: 'flex-start' }} />
       )}
 
       <ErrorText error={error} />
-      {loading ? <ActivityIndicator color={colors.accent} /> : (
-        <View style={{ gap: space.md }}>
-          {dayWorkouts.map((w) => (
-            <WorkoutCard key={w.id} workout={w} onPress={() => router.push({ pathname: '/workout/[id]', params: { id: w.id } })} />
-          ))}
+      {loading ? <div className="center" style={{ minHeight: 120 }}><Spinner /></div> : (
+        <div className="stack">
+          {dayWorkouts.map((w) => <WorkoutCard key={w.id} workout={w} onOpen={() => navigate(`/workout/${w.id}`)} />)}
 
           {dayWorkouts.length === 0 && notWrittenYet && (
-            <Empty icon="time-outline" title={`Your coach writes this week on ${longLabel(addDays(startOfWeek(selected), -1))} evening`} />
+            <Empty icon={Clock} title={`Your coach writes this week on ${longLabel(addDays(startOfWeek(selected), -1))} evening`} />
           )}
-
           {dayWorkouts.length === 0 && !notWrittenYet && (
-            hasUpcoming || selected < today() ? (
-              <Empty icon="bed-outline" title={selected < today() ? 'Nothing was scheduled' : 'Rest day. Recover well.'} />
-            ) : (
-              <Empty icon="sparkles-outline" title="No training scheduled yet">
-                <Button title="Ask your coach for a plan" icon="sparkles" onPress={() => router.push('/coach')} />
-              </Empty>
-            )
+            hasUpcoming || selected < today()
+              ? <Empty icon={BedDouble} title={selected < today() ? 'Nothing was scheduled' : 'Rest day. Recover well.'} />
+              : (
+                <Empty icon={Sparkles} title="No training scheduled yet">
+                  <Button title="Ask your coach for a plan" icon={Sparkles} onClick={() => navigate('/coach')} />
+                </Empty>
+              )
           )}
 
           {activities.length > 0 && (
@@ -102,17 +98,8 @@ export default function CalendarScreen() {
               {activities.map((a) => <ActivityRow key={a.id} activity={a} showDate={false} />)}
             </Card>
           )}
-        </View>
+        </div>
       )}
-    </Screen>
+    </>
   );
 }
-
-const styles = StyleSheet.create({
-  header: { flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between' },
-  title: { color: colors.text, fontSize: 28, fontWeight: '800', letterSpacing: -0.5 },
-  toggle: { flexDirection: 'row', backgroundColor: colors.surface, borderRadius: radius.pill, padding: 3 },
-  toggleItem: { paddingHorizontal: space.md, paddingVertical: 6, borderRadius: radius.pill },
-  toggleOn: { backgroundColor: colors.surfaceAlt },
-  toggleText: { color: colors.textMuted, fontWeight: '700', fontSize: 13 },
-});

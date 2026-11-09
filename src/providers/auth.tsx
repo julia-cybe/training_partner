@@ -1,8 +1,8 @@
 import type { Session } from '@supabase/supabase-js';
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useState } from 'react';
 
-import { deviceTimeZone } from '@/components/profile-form';
 import { getProfile, saveProfile } from '@/lib/api';
+import { deviceTimeZone } from '@/lib/dates';
 import { supabase } from '@/lib/supabase';
 import type { Profile } from '@/lib/types';
 
@@ -39,7 +39,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const { data: sub } = supabase.auth.onAuthStateChange((event, s) => {
       setSession(s);
       if (event === 'SIGNED_IN' || event === 'SIGNED_OUT') {
-        // Defer: Supabase recommends not awaiting other calls inside this callback.
+        // Supabase recommends not awaiting other calls inside this callback.
         setTimeout(() => loadProfile(s), 0);
       }
     });
@@ -48,11 +48,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const refreshProfile = useCallback(() => loadProfile(session), [loadProfile, session]);
 
-  return (
-    <AuthContext.Provider value={{ loading, session, profile, refreshProfile }}>
-      {children}
-    </AuthContext.Provider>
-  );
+  return <AuthContext.Provider value={{ loading, session, profile, refreshProfile }}>{children}</AuthContext.Provider>;
 }
 
 export function useAuth() {

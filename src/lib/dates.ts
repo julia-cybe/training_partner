@@ -59,3 +59,6 @@ export const formatPace = (metersPerSecond: number) => {
   const secPerKm = 1000 / metersPerSecond;
   return `${Math.floor(secPerKm / 60)}:${pad(Math.round(secPerKm % 60))}/km`;
 };
+
+/** The device's IANA time zone; the weekly plan is written on Sunday evening in this zone. */
+export const deviceTimeZone = () => Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';

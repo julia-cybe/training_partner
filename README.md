@@ -1,11 +1,12 @@
 # Training Partner
 
-An AI coach for CrossFit and hybrid training. It writes your training plan, shows it in a calendar like other training apps, reads your feedback after each session and your Garmin Forerunner activities and wellness data (through intervals.icu), and adapts the plan over time.
+An AI coach for CrossFit and hybrid training. It writes your training plan one week at a time, shows it in a calendar like other training apps, reads your feedback after each session and your Garmin Forerunner activities and wellness data (through intervals.icu), and adapts the plan over time.
 
-- **App:** Expo (React Native), runs on iPhone/Android (Expo Go) and in the browser
-- **Backend:** Supabase (login, database, Edge Functions)
-- **Coach:** Claude (`claude-opus-5-5`) called from a Supabase Edge Function, so your API key never ships in the app
+- **App:** a React website (Vite + TypeScript), designed for phone screens. Add it to your iPhone home screen and it opens full screen like an app.
+- **Backend:** Supabase (login, database, Edge Functions, scheduled job)
+- **Coach:** Claude (`claude-opus-5-5`) called from a Supabase Edge Function, so your API key never ships to the browser
 - **Garmin:** Forerunner → Garmin Connect → intervals.icu (free, official Garmin sync, personal API key) → app
+- **Hosting:** Vercel (static site)
 
 ## How the coach works
 
@@ -19,68 +20,63 @@ If Sunday's run fails it retries every 15 minutes (3 attempts) and catches up on
 
 ## Status of the hosted backend
 
-The Supabase project `hnaewgazztrozynchzdk` (EU West) is set up: tables, row-level security, the Edge Functions (`coach`, `garmin`, `weekly-plan`), the 15-minute schedule, and the `CRON_SECRET`/Vault secrets. Copy `.env.example` to `.env` and add the publishable key from Project Settings → API Keys. Still needed in the Supabase dashboard (Edge Functions → Secrets): `ANTHROPIC_API_KEY`.
+The Supabase project `hnaewgazztrozynchzdk` (EU West) is set up: tables, row-level security, the Edge Functions (`coach`, `garmin`, `weekly-plan`), the 15-minute schedule, and the `CRON_SECRET`/Vault secrets. Still needed in the Supabase dashboard (Edge Functions → Secrets): `ANTHROPIC_API_KEY`.
 
-## Setup (for a new Supabase project)
+## Run it locally
 
-### 1. Supabase project
+```bash
+npm install
+cp .env.example .env        # add the publishable key: Supabase -> Project Settings -> API Keys
+npm run dev
+```
 
-1. Create a free project at [supabase.com](https://supabase.com).
-2. Install the [Supabase CLI](https://supabase.com/docs/guides/cli), then from this folder:
-   ```bash
-   supabase login
-   supabase link --project-ref YOUR-PROJECT-REF
-   supabase db push                 # creates the tables
-   ```
-3. Copy `.env.example` to `.env` and fill in your project URL and publishable key (Project Settings → API Keys).
+## Deploy (Vercel)
 
-### 2. Garmin via intervals.icu
+1. On [vercel.com](https://vercel.com), choose **Add New → Project** and import this GitHub repository (framework: Vite, defaults are fine).
+2. Under **Environment Variables** add `VITE_SUPABASE_URL` (`https://hnaewgazztrozynchzdk.supabase.co`) and `VITE_SUPABASE_ANON_KEY` (the publishable key).
+3. Deploy. Every push to `master` redeploys automatically.
+4. In Supabase → Authentication → URL Configuration, set **Site URL** to your Vercel address, so sign-up emails link back to the app.
+
+## Add it to your iPhone home screen
+
+Open the site in **Safari**, tap Share → **Add to Home Screen**. It then opens full screen without Safari's bars. The home-screen app keeps its own storage, so sign in once more inside it.
+
+## Garmin via intervals.icu
 
 1. Create a free account at [intervals.icu](https://intervals.icu) and connect Garmin under Settings → Connections.
 2. In the app's Activities tab, enter your athlete ID and API key from intervals.icu → Settings → Developer Settings. The key is stored server-side only.
 
-### 3. Edge Function secrets and deploy
+## Setting up a new Supabase project
 
 ```bash
-cp supabase/functions/.env.example supabase/functions/.env
-# fill in ANTHROPIC_API_KEY and CRON_SECRET
-supabase secrets set --env-file supabase/functions/.env
+supabase login
+supabase link --project-ref YOUR-PROJECT-REF
+supabase db push                       # tables, schedule
+supabase secrets set ANTHROPIC_API_KEY=... CRON_SECRET=...
 supabase functions deploy
 ```
 
-Then let the Sunday job reach your functions. In the Supabase SQL editor, using the same `CRON_SECRET` value:
+Then, in the SQL editor, let the Sunday job reach your functions (same `CRON_SECRET` value):
 
 ```sql
 select vault.create_secret('https://YOUR-PROJECT-REF.supabase.co', 'project_url');
 select vault.create_secret('YOUR-CRON-SECRET', 'cron_secret');
 ```
 
-### 4. Run the app
-
-```bash
-npm install
-npx expo start
-```
-
-Press `w` for the browser, or scan the QR code with **Expo Go** on your phone.
-
 ## Project layout
 
 ```
-src/app/                 screens (Expo Router)
-  (tabs)/index.tsx       calendar (week / month)
-  (tabs)/coach.tsx       plan generation + chat with coach
-  (tabs)/activities.tsx  Garmin connection (intervals.icu) + activities
-  (tabs)/profile.tsx     athlete profile
-  workout/[id].tsx       workout detail + feedback log
-src/components/          UI components
+index.html, public/      page head (home-screen tags), manifest, icons
+src/pages/               calendar, coach, activities, profile, workout, sign-in, onboarding
+src/components/          UI components (calendar, workout cards, forms)
 src/lib/                 Supabase client, data access, types, dates
+src/styles.css           design tokens and all styling
 supabase/migrations/     database schema (with row-level security)
 supabase/functions/
   coach/                 Claude coach: new block / next week / feedback / message
-  weekly-plan/           Sunday job (pg_cron, every 15 min) that writes next week
-  _shared/planning.ts    block and weekly planning logic
   garmin/                connect / sync / disconnect intervals.icu
+  weekly-plan/           Sunday job (pg_cron, every 15 min) that writes next week
+  _shared/               planning, coach prompt and schemas, intervals.icu client
 ```
 
 ## Notes
@@ -88,4 +84,4 @@ supabase/functions/
 - Writing a week takes about a minute; the weekly job runs in the background so nothing waits on it.
 - The coach syncs intervals.icu before every plan and review, so recent Garmin sessions and wellness are always included.
 - Activities that reached intervals.icu from Strava (rather than directly from Garmin) may come through with little detail, so connect Garmin directly in intervals.icu.
-- Checks: `npm run typecheck` (app) and `deno check supabase/functions/*/index.ts` (functions).
+- Checks: `npm run build` (type-check + build) and `deno check supabase/functions/*/index.ts` (functions).
